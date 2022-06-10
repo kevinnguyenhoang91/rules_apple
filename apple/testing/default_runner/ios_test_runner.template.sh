@@ -219,7 +219,7 @@ if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
         "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
         -output-dir="$OUTPUT_DIR/$i/coverage" \
         -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
-        -name-regex=".*/$i/$FILTER_REGEX"
+        -name-regex=".*$i.*"
     done
   fi
 fi
