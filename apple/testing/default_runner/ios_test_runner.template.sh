@@ -201,6 +201,29 @@ if [[ -n "$TESTBRIDGE_TEST_ONLY" || -n "$TEST_FILTER" ]]; then
   fi
 fi
 
+if [[ "${TEST_HOST_ENVS:-}" != "" ]]; then
+  TEST_HOST_ENVS=$(echo ${TEST_HOST_ENVS} | tr ";" ",")
+  TEST_HOST_ENVS=${TEST_HOST_ENVS//:/\":\"}
+  TEST_HOST_ENVS=${TEST_HOST_ENVS//,/\",\"}
+  TEST_HOST_ENVS="{\"${TEST_HOST_ENVS}\"}"
+  if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
+    LAUNCH_OPTIONS_JSON_STR+=","
+  fi
+  LAUNCH_OPTIONS_JSON_STR+="\"app_under_test_env_vars\":${TEST_HOST_ENVS}"
+fi
+
+if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
+  LAUNCH_OPTIONS_JSON_STR+=","
+fi
+LAUNCH_OPTIONS_JSON_STR+="\"uitest_auto_screenshots\":true"
+
+if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
+  LAUNCH_OPTIONS_JSON_STR+=","
+fi
+LAUNCH_OPTIONS_JSON_STR+="\"keep_xcresult_data\":true"
+
+echo $LAUNCH_OPTIONS_JSON_STR
+
 if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
   LAUNCH_OPTIONS_JSON_STR="{${LAUNCH_OPTIONS_JSON_STR}}"
   LAUNCH_OPTIONS_JSON_PATH="${TMP_DIR}/launch_options.json"
@@ -208,52 +231,63 @@ if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
   runner_flags+=("--launch_options_json_path=${LAUNCH_OPTIONS_JSON_PATH}")
 fi
 
-target_flags=()
-if [[ -n "${REUSE_GLOBAL_SIMULATOR:-}" ]]; then
-  if [[ -n "$device_id" ]]; then
-    echo "error: both '\$REUSE_GLOBAL_SIMULATOR' and a custom simulator id cannot be set" >&2
-    exit 1
-  fi
-
-  if [[ -z "%(os_version)s" ]]; then
-    echo "error: to create a re-useable simulator the OS version must always be set on the test runner or with '--ios_simulator_version'" >&2
-    exit 1
-  fi
-
-  if [[ -z "%(device_type)s" ]]; then
-    echo "error: to create a re-useable simulator the device type must always be set on the test runner or with '--ios_simulator_device'" >&2
-    exit 1
-  fi
-
-  id="$("./%(simulator_creator)s" "%(os_version)s" "%(device_type)s")"
-  target_flags=(
-    "test"
-    "--platform=ios_simulator"
-    "--id=$id"
-  )
-elif [[ -n "$device_id" ]]; then
-  target_flags=(
-    "test"
-    "--platform=$platform"
-    "--id=$device_id"
-  )
+cmd=
+if [[ "${REAL_DEVICE_TEST:-false}" == "true" ]]; then
+  cmd=("%(testrunner_binary)s"
+    "${runner_flags[@]}"
+    test
+    "--id=${DEVICE_ID:-0}"
+    "--platform=${DEVICE_PLATFORM:-ios_device}"
+    "$@")
 else
-  target_flags=(
-    "simulator_test"
-    "--device_type=%(device_type)s"
-    "--os_version=%(os_version)s"
-  )
+  target_flags=()
+  if [[ -n "${REUSE_GLOBAL_SIMULATOR:-}" ]]; then
+    if [[ -n "$device_id" ]]; then
+      echo "error: both '\$REUSE_GLOBAL_SIMULATOR' and a custom simulator id cannot be set" >&2
+      exit 1
+    fi
+
+    if [[ -z "%(os_version)s" ]]; then
+      echo "error: to create a re-useable simulator the OS version must always be set on the test runner or with '--ios_simulator_version'" >&2
+      exit 1
+    fi
+
+    if [[ -z "%(device_type)s" ]]; then
+      echo "error: to create a re-useable simulator the device type must always be set on the test runner or with '--ios_simulator_device'" >&2
+      exit 1
+    fi
+
+    id="$("./%(simulator_creator)s" "%(os_version)s" "%(device_type)s")"
+    target_flags=(
+      "test"
+      "--platform=ios_simulator"
+      "--id=$id"
+    )
+  elif [[ -n "$device_id" ]]; then
+    target_flags=(
+      "test"
+      "--platform=$platform"
+      "--id=$device_id"
+    )
+  else
+    target_flags=(
+      "simulator_test"
+      "--device_type=%(device_type)s"
+      "--os_version=%(os_version)s"
+    )
+  fi
+
+  cmd=("%(testrunner_binary)s"
+    "${runner_flags[@]}"
+    "${target_flags[@]}"
+    "${custom_xctestrunner_args[@]}")
 fi
 
-cmd=("%(testrunner_binary)s"
-  "${runner_flags[@]}"
-  "${target_flags[@]}"
-  "${custom_xctestrunner_args[@]}")
 "${cmd[@]}" 2>&1
 
 set -x
 
-if [ ! -z ${ENABLE_CODE_COVERAGE+x} ] && [[ "${ENABLE_CODE_COVERAGE}" == "true" ]]; then
+if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
   OUTPUT_DIR=$(dirname $LLVM_PROFILE_FILE)/$TEST_BUNDLE_NAME
   rm -rf $OUTPUT_DIR || true
   mkdir -p $OUTPUT_DIR
