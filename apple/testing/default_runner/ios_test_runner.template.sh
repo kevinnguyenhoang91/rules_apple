@@ -53,6 +53,7 @@ trap 'rm -rf "${TMP_DIR}"' ERR EXIT
 runner_flags+=("--work_dir=${TMP_DIR}")
 
 TEST_BUNDLE_PATH="%(test_bundle_path)s"
+TEST_NAME=$(basename_without_extension "${TEST_BUNDLE_PATH}")
 
 if [[ "$TEST_BUNDLE_PATH" == *.xctest ]]; then
   # Need to copy the bundle outside of the Bazel execroot since the test runner
@@ -147,19 +148,19 @@ if [[ "${COVERAGE:-}" -eq 1 ]]; then
   TEST_ENV="$TEST_ENV,$profile_env"
 fi
 
-# Converts the test env string to json format and addes it into launch
-# options string.
-TEST_ENV=$(echo "$TEST_ENV" | awk -F ',' '{for (i=1; i <=NF; i++) { d = index($i, "="); print substr($i, 1, d-1) "\":\"" substr($i, d+1); }}')
-TEST_ENV=${TEST_ENV//$'\n'/\",\"}
-TEST_ENV="{\"${TEST_ENV}\"}"
-LAUNCH_OPTIONS_JSON_STR="\"startup_timeout_sec\": ${STARTUP_TIMEOUT_SEC:-150}, \"env_vars\":${TEST_ENV}"
-
 # Expose test envs
 TEST_ENVS=( $(echo $TEST_ENV | tr "," " ") )
 for i in "${TEST_ENVS[@]}"; do
   ENV_VARS=( $(echo $i | tr "=" " ") )
   eval "${ENV_VARS[0]}=\"${ENV_VARS[1]}\""
 done
+
+# Converts the test env string to json format and addes it into launch
+# options string.
+TEST_ENV=$(echo "$TEST_ENV" | awk -F ',' '{for (i=1; i <=NF; i++) { d = index($i, "="); print substr($i, 1, d-1) "\":\"" substr($i, d+1); }}')
+TEST_ENV=${TEST_ENV//$'\n'/\",\"}
+TEST_ENV="{\"${TEST_ENV}\"}"
+LAUNCH_OPTIONS_JSON_STR="\"startup_timeout_sec\": ${STARTUP_TIMEOUT_SEC:-150}, \"env_vars\":${TEST_ENV}"
 
 if [[ -n "${command_line_args}" ]]; then
   if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
@@ -305,8 +306,6 @@ fi
 
 "${cmd[@]}" 2>&1
 
-set -x
-
 if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
   OUTPUT_DIR=$(dirname $LLVM_PROFILE_FILE)/$TEST_BUNDLE_NAME
   rm -rf $OUTPUT_DIR || true
@@ -318,6 +317,7 @@ if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
       show \
       -format=html \
       -instr-profile "${LLVM_PROFILE_FILE}.profdata" \
+      -path-equivalence="$ROOT,." \
       "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
       -output-dir="$OUTPUT_DIR/coverage" \
       -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
@@ -328,6 +328,7 @@ if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
     xcrun llvm-cov \
       report \
       -instr-profile "${LLVM_PROFILE_FILE}.profdata" \
+      -path-equivalence="$ROOT,." \
       "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
       -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
       -name-regex="$FILTER_REGEX" > "${OUTPUT_DIR}/coverage_report.txt"
@@ -341,6 +342,7 @@ if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
         show \
         -format=html \
         -instr-profile "${LLVM_PROFILE_FILE}.profdata" \
+        -path-equivalence="$ROOT,." \
         "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
         -output-dir="$OUTPUT_DIR/$i/coverage" \
         -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
@@ -348,8 +350,6 @@ if [[ "${ENABLE_CODE_COVERAGE:-false}" == "true" ]]; then
     done
   fi
 fi
-
-set +x
 
 if [[ "${COVERAGE:-}" -ne 1 ]]; then
   # Normal tests run without coverage
@@ -361,8 +361,8 @@ xcrun llvm-profdata merge "$profraw" --output "$profdata"
 
 lcov_args=(
   -instr-profile "$profdata"
-  -ignore-filename-regex='.*external/.+'
-  -path-equivalence=".,$PWD"
+  -ignore-filename-regex='.*bazel-out/.+'
+  -path-equivalence="$ROOT,."
 )
 has_binary=false
 IFS=";"
@@ -418,6 +418,79 @@ if [[ -n "${COVERAGE_PRODUCE_JSON:-}" ]]; then
     || llvm_cov_json_export_status=$?
   if [[ -s "$error_file" || "$llvm_cov_json_export_status" -ne 0 ]]; then
     echo "error: while exporting json coverage report" >&2
+    cat "$error_file" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "${COVERAGE_PRODUCE_HTML:-}" ]]; then
+  lcov_args=(
+    -instr-profile "$profdata"
+    -ignore-filename-regex='.*bazel-out/.+'
+    -path-equivalence="$ROOT,."
+  )
+  has_binary=false
+  IFS=";"
+  arch=$(uname -m)
+  CURRENT_DIR=$(pwd)
+  for binary in $TEST_BINARIES_FOR_LLVM_COV; do
+    if [[ "$has_binary" == false ]]; then
+      lcov_args+=("${CURRENT_DIR}/${binary}")
+      has_binary=true
+      if ! file "$binary" | grep -q "$arch"; then
+        arch=x86_64
+      fi
+    else
+      lcov_args+=(-object "${CURRENT_DIR}/${binary}")
+    fi
+
+    lcov_args+=("-arch=$arch")
+  done
+
+  llvm_cov_html_export_status=0
+  pushd $ROOT
+  xcrun llvm-cov \
+      show \
+      -format=html \
+      "${lcov_args[@]}" \
+      @"$COVERAGE_MANIFEST" \
+      -output-dir="$TEST_UNDECLARED_OUTPUTS_DIR" \
+      2> "$error_file" \
+      || llvm_cov_html_export_status=$?
+  popd
+  if [[ -s "$error_file" || "$llvm_cov_html_export_status" -ne 0 ]]; then
+    echo "error: while exporting html coverage report" >&2
+    cat "$error_file" >&2
+    exit 1
+  fi
+fi
+
+if [[ -n "${COVERAGE_PRODUCE_HTML_LCOV:-}" ]]; then
+  mkdir -p "${TEST_UNDECLARED_OUTPUTS_DIR}/lcov"
+  llvm_cov_html_export_status=0
+  pushd $ROOT
+  genhtml_args=(
+    --show-details
+    --title "$TEST_NAME"
+    --header-title "$TEST_NAME Code Coverage Report"
+    --footer "Copyright © 2023 Kevin Nguyen Hoang"
+    --num-spaces 4
+    --legend
+    --sort
+    --dark-mode
+  )
+  if [[ -n "${COVERAGE_BASELINE_FILE:-}" ]]; then
+    genhtml_args+=(--baseline-file "$COVERAGE_BASELINE_FILE")
+  fi
+  /usr/local/bin/genhtml \
+      $COVERAGE_OUTPUT_FILE \
+      "${genhtml_args[@]}" \
+      --output-directory "${TEST_UNDECLARED_OUTPUTS_DIR}/lcov" \
+      2> "$error_file" \
+      || llvm_cov_html_export_status=$?
+  popd
+  if [[ -s "$error_file" || "$llvm_cov_html_export_status" -ne 0 ]]; then
+    echo "error: while exporting html coverage report" >&2
     cat "$error_file" >&2
     exit 1
   fi
