@@ -153,6 +153,13 @@ TEST_ENV=${TEST_ENV//$'\n'/\",\"}
 TEST_ENV="{\"${TEST_ENV}\"}"
 LAUNCH_OPTIONS_JSON_STR="\"startup_timeout_sec\": ${STARTUP_TIMEOUT_SEC:-150}, \"env_vars\":${TEST_ENV}"
 
+# Expose test envs
+TEST_ENVS=( $(echo $TEST_ENV | tr "," " ") )
+for i in "${TEST_ENVS[@]}"; do
+  ENV_VARS=( $(echo $i | tr "=" " ") )
+  eval "${ENV_VARS[0]}=\"${ENV_VARS[1]}\""
+done
+
 if [[ -n "${command_line_args}" ]]; then
   if [[ -n "${LAUNCH_OPTIONS_JSON_STR}" ]]; then
     LAUNCH_OPTIONS_JSON_STR+=","
@@ -262,6 +269,39 @@ cmd=("%(testrunner_binary)s"
   "${target_flags[@]}"
   "${custom_xctestrunner_args[@]}")
 "${cmd[@]}" 2>&1
+
+set -x
+
+if [ ! -z ${ENABLE_CODE_COVERAGE+x} ] && [[ "${ENABLE_CODE_COVERAGE}" == "true" ]]; then
+  OUTPUT_DIR=$(dirname $LLVM_PROFILE_FILE)/$TEST_BUNDLE_NAME
+  rm -rf $OUTPUT_DIR || true
+  mkdir -p $OUTPUT_DIR
+  xcrun llvm-profdata merge -o "${LLVM_PROFILE_FILE}.profdata" "$LLVM_PROFILE_FILE"
+
+  if [[ "${COVERAGE_HTML_REPORT}" == "True" ]]; then
+    xcrun llvm-cov \
+      show \
+      -format=html \
+      -instr-profile "${LLVM_PROFILE_FILE}.profdata" \
+      "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
+      -output-dir="$OUTPUT_DIR/coverage" \
+      -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
+      -name-regex="$FILTER_REGEX"
+
+    open "$OUTPUT_DIR/coverage/index.html"
+  fi
+
+  if [[ "${COVERAGE_TEXT_REPORT}" == "True" ]]; then
+    xcrun llvm-cov \
+      report \
+      -instr-profile "${LLVM_PROFILE_FILE}.profdata" \
+      "${TEST_BUNDLE_TMP_DIR}/${TEST_BUNDLE_NAME}.xctest/${TEST_BUNDLE_NAME}" \
+      -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
+      -name-regex="$FILTER_REGEX" > "${OUTPUT_DIR}/coverage_report.txt"
+  fi
+fi
+
+set +x
 
 if [[ "${COVERAGE:-}" -ne 1 ]]; then
   # Normal tests run without coverage

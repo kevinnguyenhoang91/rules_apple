@@ -626,22 +626,31 @@ def apple_simulator(
   Yields:
     The UDID of the simulator.
   """
-  if sim_device and sim_os_version:
-    with temporary_simulator(
-        platform_type=platform_type,
-        simctl_path=simctl_path,
-        device=sim_device,
-        version=sim_os_version,
-    ) as udid:
-      yield udid
-  else:
-    yield persistent_simulator(
-        platform_type=platform_type,
-        simctl_path=simctl_path,
-        minimum_os=minimum_os,
-        sim_device=sim_device,
-        sim_os_version=sim_os_version,
-    )
+  # if sim_device and sim_os_version:
+  #   with temporary_simulator(
+  #       platform_type=platform_type,
+  #       simctl_path=simctl_path,
+  #       device=sim_device,
+  #       version=sim_os_version,
+  #   ) as udid:
+  #     yield udid
+  # else:
+  #   yield persistent_simulator(
+  #       platform_type=platform_type,
+  #       simctl_path=simctl_path,
+  #       minimum_os=minimum_os,
+  #       sim_device=sim_device,
+  #       sim_os_version=sim_os_version,
+  #   )
+
+  # Always use persistent simulators
+  yield persistent_simulator(
+      platform_type=platform_type,
+      simctl_path=simctl_path,
+      minimum_os=minimum_os,
+      sim_device=sim_device,
+      sim_os_version=sim_os_version,
+  )
 
 
 def run_app_in_simulator(
