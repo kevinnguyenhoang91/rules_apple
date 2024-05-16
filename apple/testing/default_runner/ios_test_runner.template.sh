@@ -297,7 +297,7 @@ if [ ! -z ${ENABLE_CODE_COVERAGE+x} ] && [[ "${ENABLE_CODE_COVERAGE}" == "true" 
       -ignore-filename-regex="$IGNORE_FILTER_REGEX" \
       -name-regex="$FILTER_REGEX" > "${OUTPUT_DIR}/coverage_report.txt"
   fi
-  
+
   if [[ "${COVERAGE_HTML_REPORT_ALL_MODULES}" == "True" ]]; then
     MODULES=( $(echo $ALL_MODULES | tr ";" " ") )
     for i in "${MODULES[@]}"
