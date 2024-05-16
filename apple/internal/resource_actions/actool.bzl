@@ -46,6 +46,10 @@ load(
     "@build_bazel_rules_apple//apple/internal/utils:defines.bzl",
     "defines",
 )
+load(
+    "@build_bazel_apple_support//lib:xcode_support.bzl",
+    "xcode_support",
+)
 
 _supports_visionos = hasattr(apple_common.platform_type, "visionos")
 
